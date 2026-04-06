@@ -14,7 +14,7 @@ std::string class_names[] = {
 int main() {
     RKNNModel model;
 
-    // Загрузка модели (укажи полный путь к файлу .rknn)
+    // Загрузка модели
     if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_blind.rknn")) {
         std::cerr << "Failed to load RKNN model\n";
         return -1;
@@ -42,8 +42,10 @@ int main() {
 
         auto detections = decode(output.data(), scale, zp);
 
-        // Обработка детекций
+        bool object_detected = false;
+
         for (auto& d : detections) {
+            object_detected = true;
             std::string label = class_names[d.class_id];
 
             // Рисуем рамку
@@ -51,22 +53,29 @@ int main() {
                           cv::Rect(d.x, d.y, d.w, d.h),
                           cv::Scalar(0, 255, 0), 2);
 
+            // Вывод информации в консоль
+            std::cout << "Detected object: " << label
+                      << " | Score: " << d.score
+                      << " | x: " << d.x
+                      << " y: " << d.y
+                      << " w: " << d.w
+                      << " h: " << d.h << std::endl;
+
+            // Озвучивание объектов с уверенностью > 0.6
             if (d.score > 0.6) {
-                std::cout << "Detected: " << label
-                          << " score: " << d.score
-                          << " x:" << d.x << " y:" << d.y
-                          << " w:" << d.w << " h:" << d.h << std::endl;
-                speak(label); // озвучивание
+                speak(label);
             }
         }
 
-        // Сохраняем кадр с рамками
-        std::string filename = "frame_" + std::to_string(frame_count) + ".jpg";
-        cv::imwrite(filename, frame);
-        frame_count++;
+        // Сохраняем кадр только если есть объекты
+        if (object_detected) {
+            std::string filename = "frame_" + std::to_string(frame_count) + ".jpg";
+            cv::imwrite(filename, frame);
+            frame_count++;
+        }
 
-        // На Orange Pi нет GUI, поэтому imshow отключен
-        // if (cv::waitKey(1) == 27) break; // ESC для выхода, если нужно
+        // На Orange Pi GUI не нужен, имshow отключён
+        // Можно добавить задержку или обработку CTRL+C для выхода
     }
 
     return 0;
