@@ -13,7 +13,7 @@ std::string class_names[] = {
 int main() {
     RKNNModel model;
 
-    if (!model.load("model/yolo11_blind.rknn")) {
+    if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_blind.rknn")) {
         return -1;
     }
 
@@ -53,7 +53,7 @@ int main() {
             }
         }
 
-        cv::imshow("result", frame);
+        cv::imwrite("frame.jpg", frame);
         if (cv::waitKey(1) == 27) break;
     }
 

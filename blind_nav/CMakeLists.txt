@@ -4,8 +4,13 @@ project(blind_nav)
 set(CMAKE_CXX_STANDARD 17)
 
 # RKNN
-include_directories(/usr/include)
-link_directories(/usr/lib)
+# link_directories(/usr/lib)
+
+set(RKNN_API_PATH /root/diplom/rknn-toolkit2/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so)
+
+include_directories(
+    /root/diplom/rknn-toolkit2/rknpu2/runtime/Linux/librknn_api/include
+)
 
 # OpenCV
 find_package(OpenCV REQUIRED)
@@ -19,5 +24,5 @@ add_executable(blind_nav
 
 target_link_libraries(blind_nav
     ${OpenCV_LIBS}
-    rknnrt
+    ${RKNN_API_PATH}
 )
