@@ -4,10 +4,9 @@
 #include <vector>
 #include <iostream>
 
-static float fast_sigmoid(float x) {
-    return 1.0f / (1.0f + std::exp(-x));
-}
+inline float fast_sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
+// IoU и NMS (без изменений)
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x); float y1 = std::max(a.y, b.y);
     float x2 = std::min(a.x + a.w, b.x + b.w); float y2 = std::min(a.y + a.h, b.y + b.h);
@@ -16,17 +15,14 @@ float calculate_iou(const Detection& a, const Detection& b) {
 }
 
 void apply_nms(std::vector<Detection>& input, float threshold) {
-    std::sort(input.begin(), input.end(), [](const Detection& a, const Detection& b) {
-        return a.score > b.score;
-    });
+    std::sort(input.begin(), input.end(), [](const Detection& a, const Detection& b) { return a.score > b.score; });
     std::vector<bool> removed(input.size(), false);
     std::vector<Detection> result;
     for (size_t i = 0; i < input.size(); i++) {
         if (removed[i]) continue;
         result.push_back(input[i]);
         for (size_t j = i + 1; j < input.size(); j++) {
-            if (input[i].class_id == input[j].class_id && calculate_iou(input[i], input[j]) > threshold) 
-                removed[j] = true;
+            if (input[i].class_id == input[j].class_id && calculate_iou(input[i], input[j]) > threshold) removed[j] = true;
         }
     }
     input = result;
@@ -35,7 +31,6 @@ void apply_nms(std::vector<Detection>& input, float threshold) {
 std::vector<Detection> decode(float* output, int input_w, int input_h,
                               int orig_w, int orig_h, float threshold) {
     std::vector<Detection> all_dets;
-    const int num_classes = 10;
     const int num_anchors = 5376;
     const int num_channels = 14; 
 
@@ -44,43 +39,51 @@ std::vector<Detection> decode(float* output, int input_w, int input_h,
     float off_y = (input_h - orig_h * scale_l) / 2.0f;
 
     for (int i = 0; i < num_anchors; i++) {
-        float* ptr = output + (i * num_channels);
+        // Мы берем строку i, в которой 14 значений лежат ПОДРЯД
+        float* row = output + (i * num_channels);
 
-        // ВАРИАНТ Б: Сначала идут 10 классов (0-9), потом 4 координаты (10-13)
+        // Согласно логике YOLO, если первые 4 числа — это координаты, 
+        // то классы начинаются с 4-го индекса
         float max_logit = -100.0f;
         int cls_id = -1;
-        for (int c = 0; c < num_classes; c++) {
-            if (ptr[c] > max_logit) {
-                max_logit = ptr[c];
+
+        for (int c = 0; c < 10; c++) {
+            float val = row[c + 4]; 
+            if (val > max_logit) {
+                max_logit = val;
                 cls_id = c;
             }
         }
 
         float score = fast_sigmoid(max_logit);
 
+        // Порог 0.5
         if (score > threshold) {
-            // Координаты берем из хвоста блока
-            float x = ptr[10];
-            float y = ptr[11];
-            float w = ptr[12];
-            float h = ptr[13];
+            float x1 = row[0];
+            float y1 = row[1];
+            float x2 = row[2];
+            float y2 = row[3];
 
-            // Если координаты нормализованы (0..1), превращаем в пиксели
-            if (x < 1.01f && w < 1.01f) {
-                x *= input_w; y *= input_h;
-                w *= input_w; h *= input_h;
+            // Если это [x, y, w, h]
+            float w = x2;
+            float h = y2;
+            float x = x1 - w/2.0f;
+            float y = y1 - h/2.0f;
+
+            // Если вдруг это [x1, y1, x2, y2], то w = x2-x1, h = y2-y1
+            if (w < 0 || w > 512) {
+                w = x2 - x1;
+                h = y2 - y1;
+                x = x1;
+                y = y1;
             }
 
-            // Масштабируем cx, cy, w, h -> x_min, y_min, w, h
-            float real_w = w / scale_l;
-            float real_h = h / scale_l;
-            float real_x = (x - off_x) / scale_l - (real_w / 2.0f);
-            float real_y = (y - off_y) / scale_l - (real_h / 2.0f);
+            float rx = (x - off_x) / scale_l;
+            float ry = (y - off_y) / scale_l;
+            float rw = w / scale_l;
+            float rh = h / scale_l;
 
-            // Жесткий фильтр мусора
-            if (real_w > 15 && real_h > 15 && real_x > -100 && real_y > -100) {
-                all_dets.push_back({cls_id, score, real_x, real_y, real_w, real_h});
-            }
+            all_dets.push_back({cls_id, score, rx, ry, rw, rh});
         }
     }
 
