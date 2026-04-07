@@ -42,42 +42,50 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
                               int orig_w, int orig_h, float threshold) {
     std::vector<Detection> all_dets;
     const int num_classes = 10;
-    const int num_anchors = 5376; 
-    
-    float sw = (float)orig_w / input_w;
-    float sh = (float)orig_h / input_h;
+    const int num_anchors = 5376;
 
-    for (int a_idx = 0; a_idx < num_anchors; a_idx++) {
-        // 1. Ищем лучший класс. Они начинаются с 4-го канала (0,1,2,3 - это боксы)
-        float max_score = -10.0f;
+    // Считаем параметры Letterbox для возврата координат
+    float scale_letterbox = std::min((float)input_w / orig_w, (float)input_h / orig_h);
+    float offset_x = (input_w - orig_w * scale_letterbox) / 2.0f;
+    float offset_y = (input_h - orig_h * scale_letterbox) / 2.0f;
+
+    // Диагностика: ищем максимальный байт в каналах классов (4-13)
+    int max_raw_val = -128;
+    for (int c = 4; c < 14; c++) {
+        for (int a = 0; a < num_anchors; a++) {
+            if (output[c * num_anchors + a] > max_raw_val) max_raw_val = output[c * num_anchors + a];
+        }
+    }
+    std::cout << "Debug: Max class byte: " << (int)max_raw_val << " (Target ZP: " << zp << ")" << std::endl;
+
+    for (int i = 0; i < num_anchors; i++) {
+        float max_logit = -100.0f;
         int cls_id = -1;
 
         for (int c = 0; c < num_classes; c++) {
-            int channel_idx = 4 + c; // 4 координаты + индекс класса
-            float logit = (output[channel_idx * num_anchors + a_idx] - zp) * scale;
-            if (logit > max_score) {
-                max_score = logit;
+            float logit = (output[(4 + c) * num_anchors + i] - zp) * scale;
+            if (logit > max_logit) {
+                max_logit = logit;
                 cls_id = c;
             }
         }
 
-        float prob = fast_sigmoid(max_score);
+        float score = fast_sigmoid(max_logit);
 
-        // Если нашли объект
-        if (prob > threshold) {
-            // 2. Декодируем бокс. В 14-канальной YOLO это обычно cx, cy, w, h
-            float cx = (output[0 * num_anchors + a_idx] - zp) * scale;
-            float cy = (output[1 * num_anchors + a_idx] - zp) * scale;
-            float w  = (output[2 * num_anchors + a_idx] - zp) * scale;
-            float h  = (output[3 * num_anchors + a_idx] - zp) * scale;
+        if (score > threshold) {
+            // В 14-канальных моделях RKNN обычно координаты [cx, cy, w, h]
+            float cx = (output[0 * num_anchors + i] - zp) * scale;
+            float cy = (output[1 * num_anchors + i] - zp) * scale;
+            float w  = (output[2 * num_anchors + i] - zp) * scale;
+            float h  = (output[3 * num_anchors + i] - zp) * scale;
 
-            // Пересчитываем в экранные координаты (x_min, y_min, width, height)
-            float x = (cx - w / 2.0f) * sw;
-            float y = (cy - h / 2.0f) * sh;
-            float width = w * sw;
-            float height = h * sh;
+            // Убираем смещение Letterbox и масштабируем к оригиналу
+            float real_cx = (cx - offset_x) / scale_letterbox;
+            float real_cy = (cy - offset_y) / scale_letterbox;
+            float real_w  = w / scale_letterbox;
+            float real_h  = h / scale_letterbox;
 
-            all_dets.push_back({cls_id, prob, x, y, width, height});
+            all_dets.push_back({cls_id, score, real_cx - real_w/2.0f, real_cy - real_h/2.0f, real_w, real_h});
         }
     }
 
