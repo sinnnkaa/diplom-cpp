@@ -39,7 +39,7 @@ int main() {
 
     // Декодирование (порог 0.5, так как ZP -127 очень резкий)
     auto results = decode(raw_out.data(), model.out_attr.scale, model.out_attr.zp,
-                          model.input_w, model.input_h, img_w, img_h, 0.5f);
+                          model.input_w, model.input_h, img_w, img_h, 0.2f);
 
     std::cout << "Найдено: " << results.size() << " объектов." << std::endl;
 
