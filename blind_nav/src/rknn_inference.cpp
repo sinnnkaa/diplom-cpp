@@ -39,7 +39,7 @@ std::vector<float> RKNNModel::infer(const cv::Mat& img) {
     inputs[0].type = RKNN_TENSOR_UINT8;
     inputs[0].fmt = RKNN_TENSOR_NHWC;
     inputs[0].size = rgb.total() * rgb.elemSize();
-    inputs[0].buf = rgb.data;
+    inputs[0].buf = img.data;
 
     rknn_inputs_set(ctx, 1, inputs);
     rknn_run(ctx, NULL);
