@@ -7,11 +7,9 @@ RKNNModel::RKNNModel() : ctx(0) {}
 RKNNModel::~RKNNModel() {
     if (ctx) rknn_destroy(ctx);
 }
-
 bool RKNNModel::load(const std::string& model_path) {
     std::ifstream ifs(model_path, std::ios::binary | std::ios::ate);
     if (!ifs.is_open()) return false;
-    
     std::streamsize size = ifs.tellg();
     ifs.seekg(0, std::ios::beg);
     std::vector<char> buffer(size);
@@ -19,21 +17,24 @@ bool RKNNModel::load(const std::string& model_path) {
 
     if (rknn_init(&ctx, buffer.data(), size, 0, NULL) < 0) return false;
 
-    // Запрос параметров входа/выхода
     rknn_query(ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
     
-    rknn_tensor_attr q_in_attr;
-    q_in_attr.index = 0;
-    rknn_query(ctx, RKNN_QUERY_INPUT_ATTR, &q_in_attr, sizeof(q_in_attr));
-    input_w = q_in_attr.dims[2]; // Предполагаем NHWC или NCHW
-    input_h = q_in_attr.dims[1];
-
     rknn_tensor_attr q_out_attr;
     q_out_attr.index = 0;
     rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &q_out_attr, sizeof(q_out_attr));
+    
     out_attr.scale = q_out_attr.scale;
     out_attr.zp = q_out_attr.zp;
 
+    // ВАЖНАЯ ДИАГНОСТИКА:
+    std::cout << "--- Параметры выхода NPU ---" << std::endl;
+    std::cout << "Количество выходов: " << io_num.n_output << std::endl;
+    std::cout << "Размеры (dims): ";
+    for(int i=0; i < q_out_attr.n_dims; i++) std::cout << q_out_attr.dims[i] << " ";
+    std::cout << "\n---------------------------" << std::endl;
+
+    input_w = 512; // или вытяни из input_attr
+    input_h = 512;
     return true;
 }
 
