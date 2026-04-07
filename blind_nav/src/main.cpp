@@ -13,7 +13,7 @@ int main() {
         return -1;
     }
 
-    cv::Mat frame = cv::imread("/root/diplom-cpp/blind_nav/-0GQmYRienNVqEKiQ0Mkyw.jpg");
+    cv::Mat frame = cv::imread("/root/diplom-cpp/blind_nav/_4g6iIzKJPj_8_PTRPIV3Q_aug_0.jpg");
     if (frame.empty()) {
         std::cerr << "Не удалось прочитать картинку!" << std::endl;
         return -1;
