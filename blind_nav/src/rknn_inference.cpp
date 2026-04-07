@@ -1,57 +1,65 @@
 #include "rknn_inference.h"
-#include <fstream>
 #include <iostream>
+#include <fstream>
 
-bool RKNNModel::load(const char* model_path) {
-    std::ifstream file(model_path, std::ios::binary);
-    std::vector<char> model((std::istreambuf_iterator<char>(file)),
-                             std::istreambuf_iterator<char>());
+RKNNModel::RKNNModel() : ctx(0) {}
 
-    if (rknn_init(&ctx, model.data(), model.size(), 0, NULL) != 0) {
-        std::cout << "RKNN init failed\n";
-        return false;
-    }
+RKNNModel::~RKNNModel() {
+    if (ctx) rknn_destroy(ctx);
+}
 
+bool RKNNModel::load(const std::string& model_path) {
+    std::ifstream ifs(model_path, std::ios::binary | std::ios::ate);
+    if (!ifs.is_open()) return false;
+    
+    std::streamsize size = ifs.tellg();
+    ifs.seekg(0, std::ios::beg);
+    std::vector<char> buffer(size);
+    ifs.read(buffer.data(), size);
+
+    if (rknn_init(&ctx, buffer.data(), size, 0, NULL) < 0) return false;
+
+    // Запрос параметров входа/выхода
     rknn_query(ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
+    
+    rknn_tensor_attr q_in_attr;
+    q_in_attr.index = 0;
+    rknn_query(ctx, RKNN_QUERY_INPUT_ATTR, &q_in_attr, sizeof(q_in_attr));
+    input_w = q_in_attr.dims[2]; // Предполагаем NHWC или NCHW
+    input_h = q_in_attr.dims[1];
 
-    output_attr.index = 0;
-    rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &output_attr, sizeof(output_attr));
+    rknn_tensor_attr q_out_attr;
+    q_out_attr.index = 0;
+    rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &q_out_attr, sizeof(q_out_attr));
+    out_attr.scale = q_out_attr.scale;
+    out_attr.zp = q_out_attr.zp;
 
     return true;
 }
 
-std::vector<int8_t> RKNNModel::infer(cv::Mat& img) {
-    cv::Mat resized;
-    cv::resize(img, resized, cv::Size(512, 512));
-    cv::cvtColor(resized, resized, cv::COLOR_BGR2RGB);
+std::vector<int8_t> RKNNModel::infer(const cv::Mat& img) {
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
 
-    std::vector<int8_t> input_data(512 * 512 * 3);
-    for (int i = 0; i < 512 * 512 * 3; i++) {
-        input_data[i] = (int8_t)(resized.data[i] - 128);
-    }
+    rknn_input inputs[1];
+    memset(inputs, 0, sizeof(inputs));
+    inputs[0].index = 0;
+    inputs[0].type = RKNN_TENSOR_UINT8;
+    inputs[0].size = rgb.total() * rgb.elemSize();
+    inputs[0].fmt = RKNN_TENSOR_NHWC;
+    inputs[0].buf = rgb.data;
 
-    rknn_input input;
-    memset(&input, 0, sizeof(input));
-
-    input.index = 0;
-    input.type = RKNN_TENSOR_INT8;
-    input.size = input_data.size();
-    input.fmt = RKNN_TENSOR_NHWC;
-    input.buf = input_data.data();
-
-    rknn_inputs_set(ctx, 1, &input);
+    rknn_inputs_set(ctx, io_num.n_input, inputs);
     rknn_run(ctx, NULL);
 
-    rknn_output output;
-    memset(&output, 0, sizeof(output));
-    output.want_float = 0;
+    rknn_output outputs[1];
+    memset(outputs, 0, sizeof(outputs));
+    outputs[0].want_float = 0; // Оставляем int8
 
-    rknn_outputs_get(ctx, 1, &output, NULL);
-
-    int8_t* data = (int8_t*)output.buf;
-    std::vector<int8_t> result(data, data + 14 * 5376);
-
-    rknn_outputs_release(ctx, 1, &output);
-
-    return result;
+    rknn_outputs_get(ctx, io_num.n_output, outputs, NULL);
+    
+    std::vector<int8_t> res((int8_t*)outputs[0].buf, (int8_t*)outputs[0].buf + outputs[0].size);
+    rknn_outputs_release(ctx, 1, outputs);
+    
+    return res;
 }
