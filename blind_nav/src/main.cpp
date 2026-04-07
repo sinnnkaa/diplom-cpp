@@ -46,7 +46,7 @@ int main() {
 
     // --- ДЕКОДИРОВАНИЕ ---
     // Используем порог 0.5 (для float это стандарт)
-    auto results = decode(raw_out.data(), model.input_w, model.input_h, img_w, img_h, 0.05f);
+    auto results = decode(raw_out.data(), model.input_w, model.input_h, img_w, img_h, 0.5f);
 
     std::cout << "Найдено реальных объектов: " << results.size() << std::endl;
 

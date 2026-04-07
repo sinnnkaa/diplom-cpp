@@ -4,11 +4,12 @@
 #include <vector>
 #include <iostream>
 
-static float fast_sigmoid(float x) {
+// Математическая сигмоида (нужна, так как в тензоре лежат сырые числа)
+inline float fast_sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
 
-// Стандартные функции IoU и NMS (оставляем как были)
+// IoU и NMS (без изменений)
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x); float y1 = std::max(a.y, b.y);
     float x2 = std::min(a.x + a.w, b.x + b.w); float y2 = std::min(a.y + a.h, b.y + b.h);
@@ -40,43 +41,49 @@ std::vector<Detection> decode(float* output, int input_w, int input_h,
     std::vector<Detection> all_dets;
     const int num_classes = 10;
     const int num_anchors = 5376;
+    const int num_channels = 14; // 4 box + 10 class
 
     float scale_l = std::min((float)input_w / orig_w, (float)input_h / orig_h);
     float off_x = (input_w - orig_w * scale_l) / 2.0f;
     float off_y = (input_h - orig_h * scale_l) / 2.0f;
 
     for (int i = 0; i < num_anchors; i++) {
-        float max_prob = 0.0f;
+        // ЧИТАЕМ БЛОК ИЗ 14 ЧИСЕЛ ДЛЯ ТЕКУЩЕЙ ТОЧКИ
+        // Согласно твоим логам (521 в начале), координаты [x1, y1, x2, y2] идут ПЕРВЫМИ (0,1,2,3)
+        // А классы идут ВТОРЫМИ (4,5,6...13)
+        
+        float* ptr = output + (i * num_channels);
+
+        float max_logit = -100.0f;
         int cls_id = -1;
 
-        // ТЕПЕРЬ КЛАССЫ В НАЧАЛЕ (0-9)
         for (int c = 0; c < num_classes; c++) {
-            float prob = output[c * num_anchors + i]; // Берем значение напрямую (уже Sigmoid)
-            if (prob > max_prob) {
-                max_prob = prob;
+            float logit = ptr[4 + c]; // Пропускаем 4 координаты
+            if (logit > max_logit) {
+                max_logit = logit;
                 cls_id = c;
             }
         }
 
-        // Возвращаем нормальный порог 0.45 или 0.5
-        if (max_prob > threshold) {
-            // КООРДИНАТЫ ТЕПЕРЬ В КОНЦЕ (10, 11, 12, 13)
-            float x1 = output[10 * num_anchors + i];
-            float y1 = output[11 * num_anchors + i];
-            float x2 = output[12 * num_anchors + i];
-            float y2 = output[13 * num_anchors + i];
+        float score = fast_sigmoid(max_logit);
 
-            // Масштабируем обратно к оригиналу
+        // Порог 0.5 - теперь он будет работать правильно
+        if (score > threshold) {
+            float x1 = ptr[0];
+            float y1 = ptr[1];
+            float x2 = ptr[2];
+            float y2 = ptr[3];
+
+            // Масштабируем
             float rx1 = (x1 - off_x) / scale_l;
             float ry1 = (y1 - off_y) / scale_l;
             float rx2 = (x2 - off_x) / scale_l;
             float ry2 = (y2 - off_y) / scale_l;
 
-            all_dets.push_back({cls_id, max_prob, rx1, ry1, rx2 - rx1, ry2 - ry1});
+            all_dets.push_back({cls_id, score, rx1, ry1, rx2 - rx1, ry2 - ry1});
         }
     }
 
-    // Обязательно применяем NMS, чтобы убрать лишние рамки
     apply_nms(all_dets, 0.45f);
     return all_dets;
 }
