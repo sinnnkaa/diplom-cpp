@@ -2,8 +2,12 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <iostream>
 
-// Вспомогательная функция для IoU (нужна для NMS)
+static float fast_sigmoid(float x) {
+    return 1.0f / (1.0f + std::exp(-x));
+}
+
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x);
     float y1 = std::max(a.y, b.y);
@@ -36,24 +40,19 @@ void apply_nms(std::vector<Detection>& input, float iou_threshold) {
     input = result;
 }
 
-static float fast_sigmoid(float x) {
-    return 1.0f / (1.0f + std::exp(-x));
-}
-
 std::vector<Detection> decode(int8_t* output, float scale, int zp,
                               int input_w, int input_h,
                               int orig_w, int orig_h, float threshold) {
     std::vector<Detection> all_dets;
     const int num_classes = 10;
-    const int num_anchors = 5376; // Для 512x512 это (64*64 + 32*32 + 16*16)
+    const int num_anchors = 5376; 
     
-    // Коэффициенты масштабирования координат обратно к оригиналу
     float scale_w = (float)orig_w / input_w;
     float scale_h = (float)orig_h / input_h;
 
-    // Сетки (strides) YOLO11
+    // Смещения для каждой сетки (YOLO11: 8, 16, 32)
     int strides[] = {8, 16, 32};
-    int current_anchor_offset = 0;
+    int offset = 0;
 
     for (int stride : strides) {
         int grid_w = input_w / stride;
@@ -61,14 +60,18 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
         int grid_size = grid_w * grid_h;
 
         for (int g = 0; g < grid_size; g++) {
-            int anchor_idx = current_anchor_offset + g;
+            int idx = offset + g;
 
-            // 1. Ищем лучший класс
+            // 1. Извлекаем логиты классов и ищем максимум
+            // Попробуем прочитать данные в предположении, что они лежат "вперемешку" (Interleaved)
+            // Если это не сработает, вернемся к планарному чтению
             float max_logit = -100.0f;
             int cls_id = -1;
+
             for (int c = 0; c < num_classes; c++) {
-                // Данные в RKNN обычно лежат планарно: [C][H*W]
-                float logit = (output[(4 + c) * num_anchors + anchor_idx] - zp) * scale;
+                // Пытаемся прочитать: [Anchors][Channels]
+                // Это частое поведение RKNN для YOLO
+                float logit = (output[idx * (4 + num_classes) + (4 + c)] - zp) * scale;
                 if (logit > max_logit) {
                     max_logit = logit;
                     cls_id = c;
@@ -76,32 +79,28 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
             }
 
             float score = fast_sigmoid(max_logit);
-            if (score > threshold) {
-                // 2. Декодируем Bounding Box (Box Transformation)
-                // В YOLO11/v8 это расстояние до границ от центра ячейки
-                float d0 = (output[0 * num_anchors + anchor_idx] - zp) * scale;
-                float d1 = (output[1 * num_anchors + anchor_idx] - zp) * scale;
-                float d2 = (output[2 * num_anchors + anchor_idx] - zp) * scale;
-                float d3 = (output[3 * num_anchors + anchor_idx] - zp) * scale;
 
-                // Вычисляем координаты ячейки (grid x, grid y)
+            // ПОНИЖАЕМ ПОРОГ ДЛЯ ТЕСТА до 0.3, чтобы увидеть хоть что-то
+            if (score > 0.3f) {
+                // Координаты (Box)
+                float d0 = (output[idx * (4 + num_classes) + 0] - zp) * scale;
+                float d1 = (output[idx * (4 + num_classes) + 1] - zp) * scale;
+                float d2 = (output[idx * (4 + num_classes) + 2] - zp) * scale;
+                float d3 = (output[idx * (4 + num_classes) + 3] - zp) * scale;
+
                 int gy = g / grid_w;
                 int gx = g % grid_w;
 
-                // Формула: координата = (центр_ячейки + смещение) * stride
-                // Для упрощенного экспорта rknn без DFL:
-                float x_center = (gx + 0.5f) * stride;
-                float y_center = (gy + 0.5f) * stride;
-                
-                float x1 = (x_center - d0 * stride) * scale_w;
-                float y1 = (y_center - d1 * stride) * scale_h;
-                float x2 = (x_center + d2 * stride) * scale_w;
-                float y2 = (y_center + d3 * stride) * scale_h;
+                // Упрощенное восстановление координат
+                float x1 = (gx + 0.5f - d0) * stride * scale_w;
+                float y1 = (gy + 0.5f - d1) * stride * scale_h;
+                float x2 = (gx + 0.5f + d2) * stride * scale_w;
+                float y2 = (gy + 0.5f + d3) * stride * scale_h;
 
                 all_dets.push_back({cls_id, score, x1, y1, x2 - x1, y2 - y1});
             }
         }
-        current_anchor_offset += grid_size;
+        offset += grid_size;
     }
 
     apply_nms(all_dets, 0.45f);
