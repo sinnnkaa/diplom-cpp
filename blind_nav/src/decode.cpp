@@ -1,12 +1,16 @@
+
 #include "decode.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
-#include <iostream>
 
 static float fast_sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
+
+// IoU и NMS (оставь те же, что были раньше)
+// ... calculate_iou ...
+// ... apply_nms ...
 
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x);
@@ -50,9 +54,9 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
     float scale_w = (float)orig_w / input_w;
     float scale_h = (float)orig_h / input_h;
 
-    // Смещения для каждой сетки (YOLO11: 8, 16, 32)
+    // Сетки для YOLO11
     int strides[] = {8, 16, 32};
-    int offset = 0;
+    int current_offset = 0;
 
     for (int stride : strides) {
         int grid_w = input_w / stride;
@@ -60,18 +64,15 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
         int grid_size = grid_w * grid_h;
 
         for (int g = 0; g < grid_size; g++) {
-            int idx = offset + g;
+            int a_idx = current_offset + g;
 
-            // 1. Извлекаем логиты классов и ищем максимум
-            // Попробуем прочитать данные в предположении, что они лежат "вперемешку" (Interleaved)
-            // Если это не сработает, вернемся к планарному чтению
+            // 1. Читаем логиты классов (ПЛАНАРНЫЙ формат)
             float max_logit = -100.0f;
             int cls_id = -1;
 
             for (int c = 0; c < num_classes; c++) {
-                // Пытаемся прочитать: [Anchors][Channels]
-                // Это частое поведение RKNN для YOLO
-                float logit = (output[idx * (4 + num_classes) + (4 + c)] - zp) * scale;
+                // Канал смещается на grid_size * канал
+                float logit = (output[(4 + c) * num_anchors + a_idx] - zp) * scale;
                 if (logit > max_logit) {
                     max_logit = logit;
                     cls_id = c;
@@ -80,27 +81,31 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
 
             float score = fast_sigmoid(max_logit);
 
-            // ПОНИЖАЕМ ПОРОГ ДЛЯ ТЕСТА до 0.3, чтобы увидеть хоть что-то
-            if (score > 0.3f) {
-                // Координаты (Box)
-                float d0 = (output[idx * (4 + num_classes) + 0] - zp) * scale;
-                float d1 = (output[idx * (4 + num_classes) + 1] - zp) * scale;
-                float d2 = (output[idx * (4 + num_classes) + 2] - zp) * scale;
-                float d3 = (output[idx * (4 + num_classes) + 3] - zp) * scale;
+            // Порог 0.6, чтобы отсечь мусор
+            if (score > 0.6f) {
+                // 2. Декодируем координаты
+                float d0 = (output[0 * num_anchors + a_idx] - zp) * scale;
+                float d1 = (output[1 * num_anchors + a_idx] - zp) * scale;
+                float d2 = (output[2 * num_anchors + a_idx] - zp) * scale;
+                float d3 = (output[3 * num_anchors + a_idx] - zp) * scale;
 
                 int gy = g / grid_w;
                 int gx = g % grid_w;
 
-                // Упрощенное восстановление координат
-                float x1 = (gx + 0.5f - d0) * stride * scale_w;
-                float y1 = (gy + 0.5f - d1) * stride * scale_h;
-                float x2 = (gx + 0.5f + d2) * stride * scale_w;
-                float y2 = (gy + 0.5f + d3) * stride * scale_h;
+                // Центр ячейки
+                float cx = (gx + 0.5f) * stride;
+                float cy = (gy + 0.5f) * stride;
+
+                // Восстановление бокса (x1, y1, x2, y2)
+                float x1 = (cx - d0 * stride) * scale_w;
+                float y1 = (cy - d1 * stride) * scale_h;
+                float x2 = (cx + d2 * stride) * scale_w;
+                float y2 = (cy + d3 * stride) * scale_h;
 
                 all_dets.push_back({cls_id, score, x1, y1, x2 - x1, y2 - y1});
             }
         }
-        offset += grid_size;
+        current_offset += grid_size;
     }
 
     apply_nms(all_dets, 0.45f);
