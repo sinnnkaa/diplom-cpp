@@ -17,7 +17,7 @@ int main() {
     }
     std::cout << "Модель успешно загружена." << std::endl;
 
-    std::string img_path = "/root/diplom-cpp/blind_nav/frame_2.jpg";
+    std::string img_path = "/root/diplom-cpp/blind_nav/-0GQmYRienNVqEKiQ0Mkyw.jpg";
     std::cout << "Чтение картинки: " << img_path << "..." << std::endl;
     cv::Mat frame = cv::imread(img_path);
     
