@@ -25,9 +25,8 @@ void apply_nms(std::vector<Detection>& input, float threshold) {
         if (removed[i]) continue;
         result.push_back(input[i]);
         for (size_t j = i + 1; j < input.size(); j++) {
-            if (input[i].class_id == input[j].class_id) {
-                if (calculate_iou(input[i], input[j]) > threshold) removed[j] = true;
-            }
+            if (input[i].class_id == input[j].class_id && calculate_iou(input[i], input[j]) > threshold) 
+                removed[j] = true;
         }
     }
     input = result;
@@ -45,51 +44,46 @@ std::vector<Detection> decode(float* output, int input_w, int input_h,
     float off_y = (input_h - orig_h * scale_l) / 2.0f;
 
     for (int i = 0; i < num_anchors; i++) {
-        // Указываем на начало блока из 14 чисел для текущего анкора
         float* ptr = output + (i * num_channels);
 
-        // 1. Ищем лучший класс среди индексов 4-13
+        // ВАРИАНТ Б: Сначала идут 10 классов (0-9), потом 4 координаты (10-13)
         float max_logit = -100.0f;
         int cls_id = -1;
         for (int c = 0; c < num_classes; c++) {
-            if (ptr[4 + c] > max_logit) {
-                max_logit = ptr[4 + c];
+            if (ptr[c] > max_logit) {
+                max_logit = ptr[c];
                 cls_id = c;
             }
         }
 
-        // Если в тензоре уже вероятности (0..1), сигмоида не изменит их сильно.
-        // Если там логиты, она приведет их к 0..1.
         float score = fast_sigmoid(max_logit);
 
         if (score > threshold) {
-            // 2. Координаты (0, 1, 2, 3)
-            // ПРОВЕРКА: если значения < 1.0, умножаем на размер входа (512)
-            float cx = ptr[0];
-            float cy = ptr[1];
-            float w  = ptr[2];
-            float h  = ptr[3];
+            // Координаты берем из хвоста блока
+            float x = ptr[10];
+            float y = ptr[11];
+            float w = ptr[12];
+            float h = ptr[13];
 
-            if (cx <= 1.01f && cy <= 1.01f) {
-                cx *= input_w;
-                cy *= input_h;
-                w  *= input_w;
-                h  *= input_h;
+            // Если координаты нормализованы (0..1), превращаем в пиксели
+            if (x < 1.01f && w < 1.01f) {
+                x *= input_w; y *= input_h;
+                w *= input_w; h *= input_h;
             }
 
             // Масштабируем cx, cy, w, h -> x_min, y_min, w, h
             float real_w = w / scale_l;
             float real_h = h / scale_l;
-            float real_x = (cx - off_x) / scale_l - (real_w / 2.0f);
-            float real_y = (cy - off_y) / scale_l - (real_h / 2.0f);
+            float real_x = (x - off_x) / scale_l - (real_w / 2.0f);
+            float real_y = (y - off_y) / scale_l - (real_h / 2.0f);
 
-            // Исключаем рамки, которые выходят за границы или слишком маленькие
-            if (real_w > 10 && real_h > 10 && real_x < orig_w && real_y < orig_h) {
+            // Жесткий фильтр мусора
+            if (real_w > 15 && real_h > 15 && real_x > -100 && real_y > -100) {
                 all_dets.push_back({cls_id, score, real_x, real_y, real_w, real_h});
             }
         }
     }
 
-    apply_nms(all_dets, 0.45f); // Очищаем наложения
+    apply_nms(all_dets, 0.45f);
     return all_dets;
 }
