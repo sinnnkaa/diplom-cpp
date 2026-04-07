@@ -3,14 +3,13 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <iostream>
 
 static float fast_sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
 
-// IoU и NMS (оставь те же, что были раньше)
-// ... calculate_iou ...
-// ... apply_nms ...
+// Функции calculate_iou и apply_nms оставь как были раньше
 
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x);
@@ -50,11 +49,11 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
     std::vector<Detection> all_dets;
     const int num_classes = 10;
     const int num_anchors = 5376; 
-    
+    const int channels = 64 + num_classes; // Всего 74 канала для YOLO11
+
     float scale_w = (float)orig_w / input_w;
     float scale_h = (float)orig_h / input_h;
 
-    // Сетки для YOLO11
     int strides[] = {8, 16, 32};
     int current_offset = 0;
 
@@ -66,13 +65,14 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
         for (int g = 0; g < grid_size; g++) {
             int a_idx = current_offset + g;
 
-            // 1. Читаем логиты классов (ПЛАНАРНЫЙ формат)
+            // 1. Ищем лучший класс (они начинаются ПОСЛЕ 64 каналов боксов)
             float max_logit = -100.0f;
             int cls_id = -1;
 
             for (int c = 0; c < num_classes; c++) {
-                // Канал смещается на grid_size * канал
-                float logit = (output[(4 + c) * num_anchors + a_idx] - zp) * scale;
+                // Сдвигаемся на 64 (DFL) и берем канал класса c
+                int channel_idx = 64 + c;
+                float logit = (output[channel_idx * num_anchors + a_idx] - zp) * scale;
                 if (logit > max_logit) {
                     max_logit = logit;
                     cls_id = c;
@@ -81,26 +81,27 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
 
             float score = fast_sigmoid(max_logit);
 
-            // Порог 0.6, чтобы отсечь мусор
-            if (score > 0.6f) {
-                // 2. Декодируем координаты
-                float d0 = (output[0 * num_anchors + a_idx] - zp) * scale;
-                float d1 = (output[1 * num_anchors + a_idx] - zp) * scale;
-                float d2 = (output[2 * num_anchors + a_idx] - zp) * scale;
-                float d3 = (output[3 * num_anchors + a_idx] - zp) * scale;
+            // Если нашли что-то похожее на объект
+            if (score > threshold) {
+                // 2. Декодируем координаты (упрощенно из DFL)
+                // Берем среднее из 16 значений для каждой стороны
+                float d[4] = {0, 0, 0, 0};
+                for (int side = 0; side < 4; side++) {
+                    float sum = 0;
+                    for (int j = 0; j < 16; j++) {
+                        sum += (output[(side * 16 + j) * num_anchors + a_idx] - zp) * scale;
+                    }
+                    d[side] = sum / 16.0f; // Упрощенное чтение DFL
+                }
 
                 int gy = g / grid_w;
                 int gx = g % grid_w;
 
-                // Центр ячейки
-                float cx = (gx + 0.5f) * stride;
-                float cy = (gy + 0.5f) * stride;
-
-                // Восстановление бокса (x1, y1, x2, y2)
-                float x1 = (cx - d0 * stride) * scale_w;
-                float y1 = (cy - d1 * stride) * scale_h;
-                float x2 = (cx + d2 * stride) * scale_w;
-                float y2 = (cy + d3 * stride) * scale_h;
+                // Восстанавливаем бокс
+                float x1 = (gx + 0.5f - d[0]) * stride * scale_w;
+                float y1 = (gy + 0.5f - d[1]) * stride * scale_h;
+                float x2 = (gx + 0.5f + d[2]) * stride * scale_w;
+                float y2 = (gy + 0.5f + d[3]) * stride * scale_h;
 
                 all_dets.push_back({cls_id, score, x1, y1, x2 - x1, y2 - y1});
             }

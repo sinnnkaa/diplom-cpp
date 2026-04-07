@@ -41,7 +41,7 @@ int main() {
 
     // Устанавливаем порог повыше (0.8), чтобы не было ложных срабатываний
     auto results = decode(raw_out.data(), model.out_attr.scale, model.out_attr.zp,
-                          model.input_w, model.input_h, frame.cols, frame.rows, 0.8f);
+                          model.input_w, model.input_h, frame.cols, frame.rows, 0.25f);
 
     std::cout << "Найдено объектов: " << results.size() << std::endl;
 
