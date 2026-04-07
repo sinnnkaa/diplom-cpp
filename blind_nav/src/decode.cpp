@@ -12,8 +12,7 @@ float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x); float y1 = std::max(a.y, b.y);
     float x2 = std::min(a.x + a.w, b.x + b.w); float y2 = std::min(a.y + a.h, b.y + b.h);
     float w = std::max(0.0f, x2 - x1); float h = std::max(0.0f, y2 - y1);
-    float inter = w * h;
-    return inter / (a.w * a.h + b.w * b.h - inter + 1e-6f);
+    return (w * h) / (a.w * a.h + b.w * b.h - w * h + 1e-6f);
 }
 
 void apply_nms(std::vector<Detection>& input, float threshold) {
@@ -26,9 +25,8 @@ void apply_nms(std::vector<Detection>& input, float threshold) {
         if (removed[i]) continue;
         result.push_back(input[i]);
         for (size_t j = i + 1; j < input.size(); j++) {
-            if (input[i].class_id == input[j].class_id) {
-                if (calculate_iou(input[i], input[j]) > threshold) removed[j] = true;
-            }
+            if (input[i].class_id == input[j].class_id && calculate_iou(input[i], input[j]) > threshold) 
+                removed[j] = true;
         }
     }
     input = result;
@@ -39,41 +37,57 @@ std::vector<Detection> decode(float* output, int input_w, int input_h,
     std::vector<Detection> all_dets;
     const int num_classes = 10;
     const int num_anchors = 5376;
-
-    // Параметры Letterbox
+    
     float scale_l = std::min((float)input_w / orig_w, (float)input_h / orig_h);
     float off_x = (input_w - orig_w * scale_l) / 2.0f;
     float off_y = (input_h - orig_h * scale_l) / 2.0f;
 
-    for (int i = 0; i < num_anchors; i++) {
-        float max_prob = 0.0f;
-        int cls_id = -1;
+    // ПРОВЕРКА ПОРЯДКА (Planar vs Interleaved)
+    // Посмотрим на первые 4 значения. Если они > 10, это скорее всего координаты (Planar)
+    bool is_planar = (std::abs(output[0]) > 10.0f || std::abs(output[num_anchors]) > 10.0f);
+    
+    std::cout << "Debug: Interpretation Mode: " << (is_planar ? "PLANAR" : "INTERLEAVED") << std::endl;
 
-        // 1. Ищем лучший класс в каналах 0-9 (ПЛАНАРНО)
-        for (int c = 0; c < num_classes; c++) {
-            float prob = output[c * num_anchors + i]; 
-            if (prob > max_prob) {
-                max_prob = prob;
-                cls_id = c;
+    for (int i = 0; i < num_anchors; i++) {
+        float max_logit = -100.0f;
+        int cls_id = -1;
+        float x, y, w, h;
+
+        if (is_planar) {
+            // PLANAR: [Channel 0...5375][Channel 1...5375]...
+            // Судя по логам, координаты в 0,1,2,3, классы в 4...13
+            for (int c = 0; c < num_classes; c++) {
+                float val = output[(4 + c) * num_anchors + i];
+                if (val > max_logit) { max_logit = val; cls_id = c; }
             }
+            x = output[0 * num_anchors + i];
+            y = output[1 * num_anchors + i];
+            w = output[2 * num_anchors + i];
+            h = output[3 * num_anchors + i];
+        } else {
+            // INTERLEAVED: [Anchor 0: 14 values][Anchor 1: 14 values]...
+            float* ptr = output + (i * 14);
+            for (int c = 0; c < num_classes; c++) {
+                float val = ptr[4 + c];
+                if (val > max_logit) { max_logit = val; cls_id = c; }
+            }
+            x = ptr[0]; y = ptr[1]; w = ptr[2]; h = ptr[3];
         }
 
-        // Если Sigmoid уже внутри, то prob будет от 0 до 1. 
-        // Если нет - примени fast_sigmoid(max_prob)
-        if (max_prob > threshold) {
-            // 2. Декодируем координаты из каналов 10, 11, 12, 13
-            float x = output[10 * num_anchors + i];
-            float y = output[11 * num_anchors + i];
-            float w = output[12 * num_anchors + i];
-            float h = output[13 * num_anchors + i];
+        float score = fast_sigmoid(max_logit);
 
-            // Восстановление из Letterbox (YOLO обычно выдает cx, cy, w, h)
+        // Порог ставим 0.5f, но если ничего не найдет, в логе увидим почему
+        if (score > threshold) {
+            // Масштабируем cx, cy, w, h -> x_min, y_min, w, h
             float real_w = w / scale_l;
             float real_h = h / scale_l;
             float real_x = (x - off_x) / scale_l - (real_w / 2.0f);
             float real_y = (y - off_y) / scale_l - (real_h / 2.0f);
 
-            all_dets.push_back({cls_id, max_prob, real_x, real_y, real_w, real_h});
+            // Фильтр от "мусорных" огромных рамок
+            if (real_w > 5 && real_h > 5 && real_w < orig_w && real_h < orig_h) {
+                all_dets.push_back({cls_id, score, real_x, real_y, real_w, real_h});
+            }
         }
     }
 
