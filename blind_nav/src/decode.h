@@ -8,8 +8,6 @@ struct Detection {
     float x, y, w, h;
 };
 
-// Декодирование выходного тензора модели YOLO
-std::vector<Detection> decode(int8_t* output, float scale, int zp,
-                              int input_w, int input_h,
-                              int orig_w, int orig_h,
-                              float score_threshold = 0.5f);
+// ИЗМЕНЕНО: убрали scale и zp, заменили int8* на float*
+std::vector<Detection> decode(float* output, int input_w, int input_h,
+                              int orig_w, int orig_h, float threshold);

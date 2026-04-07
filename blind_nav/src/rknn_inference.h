@@ -4,9 +4,9 @@
 #include <vector>
 #include <string>
 
-struct RKNNTensorAttr {
-    float scale;
-    int32_t zp;
+struct RKNNOutputAttr {
+    float scale = 1.0f;
+    int zp = 0;
 };
 
 class RKNNModel {
@@ -15,9 +15,10 @@ public:
     ~RKNNModel();
 
     bool load(const std::string& model_path);
-    std::vector<int8_t> infer(const cv::Mat& img);
+    // ИЗМЕНЕНО: теперь возвращаем vector<float>
+    std::vector<float> infer(const cv::Mat& img);
     
-    RKNNTensorAttr out_attr;
+    RKNNOutputAttr out_attr;
     int input_w, input_h;
 
 private:

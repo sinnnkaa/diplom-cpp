@@ -8,6 +8,7 @@ static float fast_sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
 
+// IoU
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x);
     float y1 = std::max(a.y, b.y);
@@ -19,6 +20,7 @@ float calculate_iou(const Detection& a, const Detection& b) {
     return inter / (a.w * a.h + b.w * b.h - inter + 1e-6f);
 }
 
+// NMS
 void apply_nms(std::vector<Detection>& input, float threshold) {
     std::sort(input.begin(), input.end(), [](const Detection& a, const Detection& b) {
         return a.score > b.score;
@@ -37,33 +39,22 @@ void apply_nms(std::vector<Detection>& input, float threshold) {
     input = result;
 }
 
-std::vector<Detection> decode(int8_t* output, float scale, int zp,
-                              int input_w, int input_h,
+std::vector<Detection> decode(float* output, int input_w, int input_h,
                               int orig_w, int orig_h, float threshold) {
     std::vector<Detection> all_dets;
     const int num_classes = 10;
     const int num_anchors = 5376;
 
-    // Считаем параметры Letterbox для возврата координат
     float scale_letterbox = std::min((float)input_w / orig_w, (float)input_h / orig_h);
     float offset_x = (input_w - orig_w * scale_letterbox) / 2.0f;
     float offset_y = (input_h - orig_h * scale_letterbox) / 2.0f;
-
-    // Диагностика: ищем максимальный байт в каналах классов (4-13)
-    int max_raw_val = -128;
-    for (int c = 4; c < 14; c++) {
-        for (int a = 0; a < num_anchors; a++) {
-            if (output[c * num_anchors + a] > max_raw_val) max_raw_val = output[c * num_anchors + a];
-        }
-    }
-    std::cout << "Debug: Max class byte: " << (int)max_raw_val << " (Target ZP: " << zp << ")" << std::endl;
 
     for (int i = 0; i < num_anchors; i++) {
         float max_logit = -100.0f;
         int cls_id = -1;
 
         for (int c = 0; c < num_classes; c++) {
-            float logit = (output[(4 + c) * num_anchors + i] - zp) * scale;
+            float logit = output[(4 + c) * num_anchors + i];
             if (logit > max_logit) {
                 max_logit = logit;
                 cls_id = c;
@@ -73,13 +64,11 @@ std::vector<Detection> decode(int8_t* output, float scale, int zp,
         float score = fast_sigmoid(max_logit);
 
         if (score > threshold) {
-            // В 14-канальных моделях RKNN обычно координаты [cx, cy, w, h]
-            float cx = (output[0 * num_anchors + i] - zp) * scale;
-            float cy = (output[1 * num_anchors + i] - zp) * scale;
-            float w  = (output[2 * num_anchors + i] - zp) * scale;
-            float h  = (output[3 * num_anchors + i] - zp) * scale;
+            float cx = output[0 * num_anchors + i];
+            float cy = output[1 * num_anchors + i];
+            float w  = output[2 * num_anchors + i];
+            float h  = output[3 * num_anchors + i];
 
-            // Убираем смещение Letterbox и масштабируем к оригиналу
             float real_cx = (cx - offset_x) / scale_letterbox;
             float real_cy = (cy - offset_y) / scale_letterbox;
             float real_w  = w / scale_letterbox;

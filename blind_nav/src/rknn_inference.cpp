@@ -18,27 +18,18 @@ bool RKNNModel::load(const std::string& model_path) {
 
     rknn_query(ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
 
-    // Получаем атрибуты входа
     rknn_tensor_attr in_attr;
     in_attr.index = 0;
     rknn_query(ctx, RKNN_QUERY_INPUT_ATTR, &in_attr, sizeof(in_attr));
     input_w = in_attr.dims[2]; 
     input_h = in_attr.dims[1];
 
-    // Получаем атрибуты выхода
-    rknn_tensor_attr q_out_attr;
-    q_out_attr.index = 0;
-    rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &q_out_attr, sizeof(q_out_attr));
-    out_attr.scale = q_out_attr.scale;
-    out_attr.zp = q_out_attr.zp;
-
-    std::cout << "Model Loaded: " << input_w << "x" << input_h << std::endl;
-    std::cout << "Output Scale: " << out_attr.scale << " ZP: " << out_attr.zp << std::endl;
-
+    std::cout << "Model Loaded! Input: " << input_w << "x" << input_h << std::endl;
     return true;
 }
 
-std::vector<int8_t> RKNNModel::infer(const cv::Mat& img) {
+// Теперь возвращаем std::vector<float>!
+std::vector<float> RKNNModel::infer(const cv::Mat& img) {
     cv::Mat rgb;
     cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
 
@@ -55,10 +46,16 @@ std::vector<int8_t> RKNNModel::infer(const cv::Mat& img) {
 
     rknn_output outputs[1];
     std::memset(outputs, 0, sizeof(outputs));
-    outputs[0].want_float = 0; 
-    rknn_outputs_get(ctx, 1, outputs, NULL);
+    // ГЛАВНЫЙ ФИКС: просим драйвер отдать float
+    outputs[0].want_float = 1; 
+    outputs[0].is_prealloc = 0;
 
-    std::vector<int8_t> result((int8_t*)outputs[0].buf, (int8_t*)outputs[0].buf + outputs[0].size);
+    if (rknn_outputs_get(ctx, 1, outputs, NULL) < 0) return {};
+
+    // Копируем как float
+    int count = outputs[0].size / sizeof(float);
+    std::vector<float> result((float*)outputs[0].buf, (float*)outputs[0].buf + count);
+    
     rknn_outputs_release(ctx, 1, outputs);
     return result;
 }
