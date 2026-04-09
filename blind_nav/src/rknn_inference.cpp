@@ -10,6 +10,7 @@ RKNNModel::~RKNNModel() {
     if (ctx > 0) rknn_destroy(ctx);
 }
 
+// Чтение файла модели в память
 static unsigned char* load_model_file(const char* filename, int* model_size) {
     std::ifstream file(filename, std::ios::binary | std::ios::ate);
     if (!file.is_open()) return nullptr;
@@ -60,17 +61,17 @@ std::vector<std::vector<float>> RKNNModel::infer(const cv::Mat& img) {
     rknn_inputs_set(ctx, 1, inputs);
     rknn_run(ctx, nullptr);
 
-    // ИЗМЕНЕНО: Теперь запрашиваем 3 выхода
+    // Запрашиваем 3 выхода в формате float
     rknn_output outputs[3];
     memset(outputs, 0, sizeof(outputs));
-    outputs[0].want_float = 1; 
-    outputs[1].want_float = 1; 
-    outputs[2].want_float = 1; 
+    outputs[0].want_float = 1;
+    outputs[1].want_float = 1;
+    outputs[2].want_float = 1;
 
     rknn_outputs_get(ctx, 3, outputs, nullptr);
 
     std::vector<std::vector<float>> dequantized_outputs(3);
-    
+
     // Размеры 3-х выходов для imgsz=512:
     // P3 (мелкие объекты): 74 * 64 * 64 = 303104
     // P4 (средние объекты): 74 * 32 * 32 = 75776
@@ -78,18 +79,10 @@ std::vector<std::vector<float>> RKNNModel::infer(const cv::Mat& img) {
     int sizes[] = {74 * 64 * 64, 74 * 32 * 32, 74 * 16 * 16};
 
     for (int i = 0; i < 3; i++) {
-        rknn_tensor_attr out_attr;
-        out_attr.index = i;
-        rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &out_attr, sizeof(out_attr));
-        float scale = out_attr.scale;
-        int32_t zp = out_attr.zp;
-
-        int8_t* raw_buf = (int8_t*)outputs[i].buf;
-        dequantized_outputs[i].resize(sizes[i]);
-        
-        for (int j = 0; j < sizes[i]; j++) {
-            dequantized_outputs[i][j] = ((float)raw_buf[j] - (float)zp) * scale;
-        }
+        // Поскольку want_float = 1, драйвер NPU уже деквантовал данные.
+        // Нам остается только скопировать готовые float значения в наш вектор.
+        float* float_buf = (float*)outputs[i].buf;
+        dequantized_outputs[i].assign(float_buf, float_buf + sizes[i]);
     }
 
     rknn_outputs_release(ctx, 3, outputs);

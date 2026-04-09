@@ -56,45 +56,46 @@ void decode_single_output(const float* output, int grid_size, int stride,
     int num_classes = 10;
     int reg_max = 16;
     int area = grid_size * grid_size;
-    
-    // Формат памяти NCHW: сначала 64 канала DFL боксов, затем 10 каналов классов
-    const float* box_ptr = output;
-    const float* cls_ptr = output + (4 * reg_max) * area; 
+    int channels = 4 * reg_max + num_classes; // 64 + 10 = 74
 
     for (int i = 0; i < area; i++) {
         int grid_y = i / grid_size;
         int grid_x = i % grid_size;
 
-        // Ищем максимальную вероятность среди 10 классов
+        // Находим смещение для текущей ячейки (i)
+        // В формате NCHW: данные одного канала лежат подряд (area)
+        
         float max_conf = -1.0f;
         int class_id = -1;
+
         for (int c = 0; c < num_classes; c++) {
-            float conf = sigmoid(cls_ptr[c * area + i]);
+            // Вероятности классов начинаются после 64 каналов боксов
+            float s = output[(64 + c) * area + i]; 
+            float conf = sigmoid(s);
             if (conf > max_conf) {
                 max_conf = conf;
                 class_id = c;
             }
         }
 
-        // Если уверенность выше порога, декодируем координаты
         if (max_conf > conf_thresh) {
-            float dfl[4]; // [left, top, right, bottom]
+            float dfl[4]; 
             for (int k = 0; k < 4; k++) {
-                const float* dfl_start = box_ptr + (k * 16) * area + i;
-                dfl[k] = compute_dfl(dfl_start, area);
+                // Вычисляем DFL для каждой из 4 сторон
+                // Берём 16 каналов, относящихся к текущей стороне k
+                dfl[k] = compute_dfl(output + (k * 16) * area + i, area);
             }
 
-            // Перевод координат в размер 512x512
-            float xmin = (grid_x - dfl[0]) * stride;
-            float ymin = (grid_y - dfl[1]) * stride;
-            float xmax = (grid_x + dfl[2]) * stride;
-            float ymax = (grid_y + dfl[3]) * stride;
+            // РАСЧЕТ В ПИКСЕЛЯХ (относительно центра ячейки и шага сетки)
+            float x0 = (grid_x + 0.5f - dfl[0]) * stride;
+            float y0 = (grid_y + 0.5f - dfl[1]) * stride;
+            float x1 = (grid_x + 0.5f + dfl[2]) * stride;
+            float y1 = (grid_y + 0.5f + dfl[3]) * stride;
 
-            proposals.push_back({class_id, max_conf, xmin, ymin, xmax - xmin, ymax - ymin});
+            proposals.push_back({class_id, max_conf, x0, y0, x1 - x0, y1 - y0});
         }
     }
 }
-
 std::vector<Detection> decode(const std::vector<std::vector<float>>& outputs, 
                               int input_w, int input_h,
                               int orig_w, int orig_h, float threshold) {

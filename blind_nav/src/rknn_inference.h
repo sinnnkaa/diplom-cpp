@@ -13,7 +13,7 @@ public:
 
     bool load(const std::string& model_path);
     
-    // ИЗМЕНЕНО: Теперь возвращает 3 тензора вместо 1
+    // Возвращаем 3 выходных тензора
     std::vector<std::vector<float>> infer(const cv::Mat& img);
 
     rknn_context get_ctx();
@@ -21,4 +21,5 @@ public:
 private:
     rknn_context ctx;
 };
+
 #endif
