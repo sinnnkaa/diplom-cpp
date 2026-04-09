@@ -1,61 +1,54 @@
+#include <iostream>
+#include <opencv2/opencv.hpp>
 #include "rknn_inference.h"
 #include "decode.h"
-#include "audio.h"
-#include <opencv2/opencv.hpp>
-#include <iostream>
 
 int main() {
-    std::cout << "--- Запуск программы (Float Mode) ---" << std::endl;
-    
+    std::cout << "--- Запуск программы (Diplom Navigation) ---" << std::endl;
+
     RKNNModel model;
     if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_stable.rknn")) {
         std::cerr << "Не удалось загрузить модель!" << std::endl;
         return -1;
     }
+    std::cout << "Model Loaded!" << std::endl;
 
-    cv::Mat frame = cv::imread("/root/diplom-cpp/blind_nav/_4g6iIzKJPj_8_PTRPIV3Q_aug_0.jpg");
-    if (frame.empty()) {
-        std::cerr << "Не удалось прочитать картинку!" << std::endl;
+    // Загружаем тестовое изображение
+    std::string img_path = "/root/diplom-cpp/blind_nav/-0GQmYRienNVqEKiQ0Mkyw.jpg";
+    cv::Mat img = cv::imread(img_path);
+    if (img.empty()) {
+        std::cerr << "Не удалось загрузить картинку: " << img_path << std::endl;
         return -1;
     }
 
-    // --- ПОДГОТОВКА КАРТИНКИ (Letterbox) ---
-    int img_w = frame.cols;
-    int img_h = frame.rows;
-    float scale_factor = std::min((float)model.input_w / img_w, (float)model.input_h / img_h);
-    int new_w = img_w * scale_factor;
-    int new_h = img_h * scale_factor;
+    int img_w = img.cols;
+    int img_h = img.rows;
 
-    cv::Mat resized;
-    cv::resize(frame, resized, cv::Size(new_w, new_h));
-
-    // Создаем черный квадрат и копируем туда изображение по центру
-    cv::Mat input_img = cv::Mat::zeros(model.input_h, model.input_w, CV_8UC3);
-    resized.copyTo(input_img(cv::Rect((model.input_w - new_w) / 2, (model.input_h - new_h) / 2, new_w, new_h)));
-    
-    // Сохраняем для визуальной проверки входа NPU
-    cv::imwrite("npu_input_check.jpg", input_img); 
-
-    // --- ИНФЕРЕНС (Один вызов) ---
-    std::vector<float> raw_out = model.infer(input_img);
+    // Инференс (теперь внутри сам делается resize до 512x512)
+    std::vector<float> raw_out = model.infer(img);
 
     if (raw_out.empty()) {
-        std::cerr << "Ошибка инференса NPU!" << std::endl;
+        std::cerr << "Ошибка инференса!" << std::endl;
         return -1;
     }
 
-    // --- ДЕКОДИРОВАНИЕ ---
-    // Используем порог 0.5 (для float это стандарт)
-    auto results = decode(raw_out.data(), model.input_w, model.input_h, img_w, img_h, 0.0001f);
+    // Декодирование результатов
+    // Передаем 512, 512 как размеры входа модели
+    auto results = decode(raw_out.data(), 512, 512, img_w, img_h, 0.45f);
 
     std::cout << "Найдено реальных объектов: " << results.size() << std::endl;
 
-    for (auto& d : results) {
-        std::cout << "Детекция: Класс " << d.class_id << " Уверенность: " << d.score << std::endl;
-        cv::rectangle(frame, cv::Rect(d.x, d.y, d.w, d.h), cv::Scalar(0, 255, 0), 3);
+    // Отрисовка
+    for (const auto& det : results) {
+        std::cout << "Рисую: Класс " << det.class_id 
+        << " [" << det.x << ", " << det.y << ", " << det.w << ", " << det.h << "]" << std::endl;
+        cv::Rect box(det.x, det.y, det.w, det.h);
+        cv::rectangle(img, box, cv::Scalar(0, 255, 0), 2);
+        std::string label = "ID:" + std::to_string(det.class_id) + " " + std::to_string(det.score).substr(0, 4);
+        cv::putText(img, label, cv::Point(det.x, det.y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
     }
 
-    cv::imwrite("result.jpg", frame);
+    cv::imwrite("result.jpg", img);
     std::cout << "Готово! Проверьте файл result.jpg" << std::endl;
 
     return 0;
