@@ -8,7 +8,6 @@ inline float fast_sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
 
-// IoU и NMS оставляем без изменений, они работают правильно
 float calculate_iou(const Detection& a, const Detection& b) {
     float x1 = std::max(a.x, b.x); float y1 = std::max(a.y, b.y);
     float x2 = std::min(a.x + a.w, b.x + b.w); float y2 = std::min(a.y + a.h, b.y + b.h);
@@ -36,49 +35,48 @@ std::vector<Detection> decode(float* output, int input_w, int input_h,
     const int num_anchors = 5376;
     const int num_channels = 14; 
 
-    // Коэффициенты масштабирования (Letterbox компенсация)
-    float scale = std::min((float)input_w / orig_w, (float)input_h / orig_h);
-    float dx = (input_w - orig_w * scale) / 2.0f;
-    float dy = (input_h - orig_h * scale) / 2.0f;
+    // Расчет коэффициентов для правильного масштаба
+    float gain = std::min((float)input_w / orig_w, (float)input_h / orig_h);
+    float pad_x = (input_w - orig_w * gain) / 2.0f;
+    float pad_y = (input_h - orig_h * gain) / 2.0f;
 
     for (int i = 0; i < num_anchors; i++) {
         float* ptr = output + (i * num_channels);
 
-        // 1. Классы (индексы 4-13)
+        // 1. Классы (каналы 4-13)
         float max_logit = -100.0f;
         int cls_id = -1;
         for (int c = 0; c < 10; c++) {
             if (ptr[c + 4] > max_logit) { max_logit = ptr[c + 4]; cls_id = c; }
         }
-
         float score = fast_sigmoid(max_logit);
 
         if (score > threshold) {
-            // 2. Координаты из тензора (индексы 0-3)
-            // ВАЖНО: Если p1...p4 > 1, значит это пиксели (0..512). 
-            // Если < 1, значит нормализованные (0..1).
-            float p1 = ptr[0]; float p2 = ptr[1];
-            float p3 = ptr[2]; float p4 = ptr[3];
+            // 2. Координаты (0-3)
+            float cx = ptr[0]; float cy = ptr[1];
+            float w  = ptr[2]; float h  = ptr[3];
 
-            // Принудительно приводим к пикселям 512x512
-            if (p1 < 1.1f && p3 < 1.1f) {
-                p1 *= 512.0f; p2 *= 512.0f; p3 *= 512.0f; p4 *= 512.0f;
-            }
+            // ЕСЛИ КООРДИНАТЫ ОГРОМНЫЕ (как в твоем логе 514), значит это ПИКСЕЛИ.
+            // Приводим их к диапазону 0..1 для универсальности:
+            if (cx > 1.1f) { cx /= 512.0f; cy /= 512.0f; w /= 512.0f; h /= 512.0f; }
 
-            // YOLOv11 output: [cx, cy, w, h]
-            float real_w = p3 / scale;
-            float real_h = p4 / scale;
-            float real_x = (p1 - dx) / scale - (real_w / 2.0f);
-            float real_y = (p2 - dy) / scale - (real_h / 2.0f);
+            // 3. ПРАВИЛЬНЫЙ пересчет в пиксели оригинала
+            float real_x = (cx * input_w - pad_x) / gain;
+            float real_y = (cy * input_h - pad_y) / gain;
+            float real_w = (w * input_w) / gain;
+            float real_h = (h * input_h) / gain;
 
-            // Фильтр: рамка должна быть внутри картинки и иметь размер
-            if (real_w > 10 && real_h > 10 && real_x >= 0 && real_y >= 0 && 
-                real_x < orig_w && real_y < orig_h) {
-                all_dets.push_back({cls_id, score, real_x, real_y, real_w, real_h});
+            // Центр -> Левый верхний угол
+            float x1 = real_x - real_w / 2.0f;
+            float y1 = real_y - real_h / 2.0f;
+
+            if (real_w > 10 && real_h > 10 && x1 < orig_w && y1 < orig_h) {
+                all_dets.push_back({cls_id, score, x1, y1, real_w, real_h});
             }
         }
     }
 
-    apply_nms(all_dets, 0.45f);
+    // Жесткий NMS (0.3), чтобы убрать горы рамок
+    apply_nms(all_dets, 0.30f);
     return all_dets;
 }
