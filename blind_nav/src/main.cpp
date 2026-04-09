@@ -14,7 +14,7 @@ int main() {
     std::cout << "Model Loaded!" << std::endl;
 
     // Загружаем тестовое изображение
-    std::string img_path = "/root/diplom-cpp/blind_nav/-0GQmYRienNVqEKiQ0Mkyw.jpg";
+    std::string img_path = "/root/diplom-cpp/blind_nav/_4g6iIzKJPj_8_PTRPIV3Q_aug_0.jpg";
     cv::Mat img = cv::imread(img_path);
     if (img.empty()) {
         std::cerr << "Не удалось загрузить картинку: " << img_path << std::endl;
