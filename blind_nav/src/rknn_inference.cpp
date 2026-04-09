@@ -10,7 +10,6 @@ RKNNModel::~RKNNModel() {
     if (ctx > 0) rknn_destroy(ctx);
 }
 
-// Вспомогательная функция для чтения файла модели
 static unsigned char* load_model_file(const char* filename, int* model_size) {
     std::ifstream file(filename, std::ios::binary | std::ios::ate);
     if (!file.is_open()) return nullptr;
@@ -38,7 +37,6 @@ bool RKNNModel::load(const std::string& model_path) {
         return false;
     }
 
-    // Запрос версии SDK для лога
     rknn_sdk_version version;
     rknn_query(ctx, RKNN_QUERY_SDK_VERSION, &version, sizeof(rknn_sdk_version));
     std::cout << "RKNN SDK Version: " << version.api_version << std::endl;
@@ -46,7 +44,7 @@ bool RKNNModel::load(const std::string& model_path) {
     return true;
 }
 
-std::vector<float> RKNNModel::infer(const cv::Mat& img) {
+std::vector<std::vector<float>> RKNNModel::infer(const cv::Mat& img) {
     cv::Mat resized, rgb;
     cv::resize(img, resized, cv::Size(512, 512));
     cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
@@ -62,28 +60,40 @@ std::vector<float> RKNNModel::infer(const cv::Mat& img) {
     rknn_inputs_set(ctx, 1, inputs);
     rknn_run(ctx, nullptr);
 
-    // ПОЛУЧАЕМ ПАРАМЕТРЫ КВАНТОВАНИЯ
-    rknn_tensor_attr out_attr;
-    out_attr.index = 0;
-    rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &out_attr, sizeof(out_attr));
-    float scale = out_attr.scale;
-    int32_t zp = out_attr.zp;
-
-    rknn_output outputs[1];
+    // ИЗМЕНЕНО: Теперь запрашиваем 3 выхода
+    rknn_output outputs[3];
     memset(outputs, 0, sizeof(outputs));
-    outputs[0].want_float = 1; // ЗАБИРАЕМ СЫРЫЕ БАЙТЫ
+    outputs[0].want_float = 1; 
+    outputs[1].want_float = 1; 
+    outputs[2].want_float = 1; 
 
-    rknn_outputs_get(ctx, 1, outputs, nullptr);
+    rknn_outputs_get(ctx, 3, outputs, nullptr);
 
-    // Вручную переводим int8 -> float
-    int8_t* raw_buf = (int8_t*)outputs[0].buf;
-    std::vector<float> dequantized(14 * 5376);
-    for (int i = 0; i < 14 * 5376; i++) {
-        dequantized[i] = ((float)raw_buf[i] - (float)zp) * scale;
+    std::vector<std::vector<float>> dequantized_outputs(3);
+    
+    // Размеры 3-х выходов для imgsz=512:
+    // P3 (мелкие объекты): 74 * 64 * 64 = 303104
+    // P4 (средние объекты): 74 * 32 * 32 = 75776
+    // P5 (крупные объекты): 74 * 16 * 16 = 18944
+    int sizes[] = {74 * 64 * 64, 74 * 32 * 32, 74 * 16 * 16};
+
+    for (int i = 0; i < 3; i++) {
+        rknn_tensor_attr out_attr;
+        out_attr.index = i;
+        rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &out_attr, sizeof(out_attr));
+        float scale = out_attr.scale;
+        int32_t zp = out_attr.zp;
+
+        int8_t* raw_buf = (int8_t*)outputs[i].buf;
+        dequantized_outputs[i].resize(sizes[i]);
+        
+        for (int j = 0; j < sizes[i]; j++) {
+            dequantized_outputs[i][j] = ((float)raw_buf[j] - (float)zp) * scale;
+        }
     }
 
-    rknn_outputs_release(ctx, 1, outputs);
-    return dequantized;
+    rknn_outputs_release(ctx, 3, outputs);
+    return dequantized_outputs;
 }
 
 rknn_context RKNNModel::get_ctx() {

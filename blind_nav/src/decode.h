@@ -8,6 +8,7 @@ struct Detection {
     float x, y, w, h;
 };
 
-// ИЗМЕНЕНО: убрали scale и zp, заменили int8* на float*
-std::vector<Detection> decode(float* output, int input_w, int input_h,
+// ИЗМЕНЕНО: Теперь принимает вектор из 3-х массивов float
+std::vector<Detection> decode(const std::vector<std::vector<float>>& outputs, 
+                              int input_w, int input_h,
                               int orig_w, int orig_h, float threshold);

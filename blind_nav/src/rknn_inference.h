@@ -12,13 +12,13 @@ public:
     ~RKNNModel();
 
     bool load(const std::string& model_path);
-    std::vector<float> infer(const cv::Mat& img);
     
-    // ДОБАВЬ ЭТУ СТРОКУ (объявление функции):
+    // ИЗМЕНЕНО: Теперь возвращает 3 тензора вместо 1
+    std::vector<std::vector<float>> infer(const cv::Mat& img);
+
     rknn_context get_ctx();
 
 private:
     rknn_context ctx;
 };
-
 #endif

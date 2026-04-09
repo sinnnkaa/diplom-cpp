@@ -29,55 +29,106 @@ void apply_nms(std::vector<Detection>& input, float threshold) {
     input = result;
 }
 
-std::vector<Detection> decode(float* output, int input_w, int input_h,
+// Вычисление DFL (Distribution Focal Loss) для одной координаты
+inline float compute_dfl(const float* tensor, int step) {
+    float max_val = -10000.0f;
+    for (int i = 0; i < 16; i++) {
+        max_val = std::max(max_val, tensor[i * step]);
+    }
+    
+    float sum = 0.0f;
+    float exp_vals[16];
+    for (int i = 0; i < 16; i++) {
+        exp_vals[i] = std::exp(tensor[i * step] - max_val);
+        sum += exp_vals[i];
+    }
+    
+    float res = 0.0f;
+    for (int i = 0; i < 16; i++) {
+        res += (exp_vals[i] / sum) * i;
+    }
+    return res;
+}
+
+// Декодирование одного масштаба (P3, P4 или P5)
+void decode_single_output(const float* output, int grid_size, int stride, 
+                          float conf_thresh, std::vector<Detection>& proposals) {
+    int num_classes = 10;
+    int reg_max = 16;
+    int area = grid_size * grid_size;
+    
+    // Формат памяти NCHW: сначала 64 канала DFL боксов, затем 10 каналов классов
+    const float* box_ptr = output;
+    const float* cls_ptr = output + (4 * reg_max) * area; 
+
+    for (int i = 0; i < area; i++) {
+        int grid_y = i / grid_size;
+        int grid_x = i % grid_size;
+
+        // Ищем максимальную вероятность среди 10 классов
+        float max_conf = -1.0f;
+        int class_id = -1;
+        for (int c = 0; c < num_classes; c++) {
+            float conf = sigmoid(cls_ptr[c * area + i]);
+            if (conf > max_conf) {
+                max_conf = conf;
+                class_id = c;
+            }
+        }
+
+        // Если уверенность выше порога, декодируем координаты
+        if (max_conf > conf_thresh) {
+            float dfl[4]; // [left, top, right, bottom]
+            for (int k = 0; k < 4; k++) {
+                const float* dfl_start = box_ptr + (k * 16) * area + i;
+                dfl[k] = compute_dfl(dfl_start, area);
+            }
+
+            // Перевод координат в размер 512x512
+            float xmin = (grid_x - dfl[0]) * stride;
+            float ymin = (grid_y - dfl[1]) * stride;
+            float xmax = (grid_x + dfl[2]) * stride;
+            float ymax = (grid_y + dfl[3]) * stride;
+
+            proposals.push_back({class_id, max_conf, xmin, ymin, xmax - xmin, ymax - ymin});
+        }
+    }
+}
+
+std::vector<Detection> decode(const std::vector<std::vector<float>>& outputs, 
+                              int input_w, int input_h,
                               int orig_w, int orig_h, float threshold) {
     std::vector<Detection> all_dets;
-    const int num_anchors = 5376;
-    const int num_classes = 10;
+    
+    // Шаги сетки и её размеры для входа 512x512
+    int strides[] = {8, 16, 32};
+    int grid_sizes[] = {input_w / 8, input_w / 16, input_w / 32}; // 64, 32, 16
 
+    // 1. Проходим по всем трем выходам
+    for (int i = 0; i < 3; i++) {
+        decode_single_output(outputs[i].data(), grid_sizes[i], strides[i], threshold, all_dets);
+    }
+
+    // 2. Возвращаем координаты в исходный размер картинки
     float scale = std::min((float)input_w / orig_w, (float)input_h / orig_h);
     float dx = (input_w - orig_w * scale) / 2.0f;
     float dy = (input_h - orig_h * scale) / 2.0f;
 
-    for (int i = 0; i < num_anchors; i++) {
-        // 1. Классы
-        float max_score = -10.0f;
-        int cls_id = -1;
-        for (int c = 0; c < num_classes; c++) {
-            float s = output[(c + 4) * num_anchors + i];
-            if (s > max_score) { max_score = s; cls_id = c; }
-        }
-        float prob = sigmoid(max_score);
+    std::vector<Detection> final_dets;
+    for (auto& det : all_dets) {
+        float real_w = det.w / scale;
+        float real_h = det.h / scale;
+        float real_x = (det.x - dx) / scale;
+        float real_y = (det.y - dy) / scale;
 
-        if (prob > threshold) {
-            // 2. Координаты (cx, cy, w, h)
-            float cx = output[0 * num_anchors + i];
-            float cy = output[1 * num_anchors + i];
-            float w  = output[2 * num_anchors + i];
-            float h  = output[3 * num_anchors + i];
-
-            // ЕСЛИ КООРДИНАТЫ МАЛЕНЬКИЕ (0..1), умножаем на 512
-            // ЕСЛИ В ДИАПАЗОНЕ СЕТКИ (0..64), тоже нормализуем
-            if (cx < 1.1f) { cx *= 512.0f; cy *= 512.0f; w *= 512.0f; h *= 512.0f; }
-            
-            // Если они всё еще подозрительно маленькие, вероятно это формат Grid (0..64)
-            // Но судя по твоим логам [-204], они уже в каком-то масштабе.
-            // Применяем стандартный пересчет:
-            float real_w = w / scale;
-            float real_h = h / scale;
-            float x0 = (cx - dx) / scale;
-            float y0 = (cy - dy) / scale;
-
-            float x_final = x0 - (real_w / 2.0f);
-            float y_final = y0 - (real_h / 2.0f);
-
-            // Фильтрация: координаты ДОЛЖНЫ быть в пределах картинки
-            if (x_final >= 0 && y_final >= 0 && x_final < orig_w && y_final < orig_h && real_w < orig_w) {
-                all_dets.push_back({cls_id, prob, x_final, y_final, real_w, real_h});
-            }
+        // Проверка выхода за границы кадра
+        if (real_x >= 0 && real_y >= 0 && real_x < orig_w && real_y < orig_h && real_w < orig_w) {
+            final_dets.push_back({det.class_id, det.score, real_x, real_y, real_w, real_h});
         }
     }
 
-    apply_nms(all_dets, 0.45f);
-    return all_dets;
+    // 3. Применяем NMS (удаление дубликатов)
+    apply_nms(final_dets, 0.45f);
+    
+    return final_dets;
 }

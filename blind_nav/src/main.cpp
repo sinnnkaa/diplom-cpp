@@ -25,7 +25,7 @@ int main() {
     int img_h = img.rows;
 
     // Инференс (теперь внутри сам делается resize до 512x512)
-    std::vector<float> raw_out = model.infer(img);
+    auto raw_out = model.infer(img);
 
     if (raw_out.empty()) {
         std::cerr << "Ошибка инференса!" << std::endl;
@@ -34,7 +34,7 @@ int main() {
 
     // Декодирование результатов
     // Передаем 512, 512 как размеры входа модели
-    auto results = decode(raw_out.data(), 512, 512, img_w, img_h, 0.4f);
+    auto results = decode(raw_out, 512, 512, img_w, img_h, 0.4f);
 
     std::cout << "Найдено реальных объектов: " << results.size() << std::endl;
 
