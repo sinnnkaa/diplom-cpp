@@ -8,7 +8,7 @@ int main() {
     std::cout << "--- Запуск программы (Float Mode) ---" << std::endl;
     
     RKNNModel model;
-    if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_blind.rknn")) {
+    if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_stable.rknn")) {
         std::cerr << "Не удалось загрузить модель!" << std::endl;
         return -1;
     }
