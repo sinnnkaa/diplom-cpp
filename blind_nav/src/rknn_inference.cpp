@@ -28,34 +28,41 @@ bool RKNNModel::load(const std::string& model_path) {
     return true;
 }
 
-// Теперь возвращаем std::vector<float>!
 std::vector<float> RKNNModel::infer(const cv::Mat& img) {
+    // 1. Подготовка входа (RGB)
     cv::Mat rgb;
     cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
 
     rknn_input inputs[1];
-    std::memset(inputs, 0, sizeof(inputs));
+    memset(inputs, 0, sizeof(inputs));
     inputs[0].index = 0;
     inputs[0].type = RKNN_TENSOR_UINT8;
-    inputs[0].fmt = RKNN_TENSOR_NHWC;
-    inputs[0].size = rgb.total() * rgb.elemSize();
+    inputs[0].fmt = RKNN_TENSOR_NHWC; // YOLO ждет NHWC (HWC в C++)
+    inputs[0].size = 512 * 512 * 3;
     inputs[0].buf = rgb.data;
 
     rknn_inputs_set(ctx, 1, inputs);
-    rknn_run(ctx, NULL);
+    rknn_run(ctx, nullptr);
 
+    // 2. Получение выхода (ВАЖНОЕ ИЗМЕНЕНИЕ)
     rknn_output outputs[1];
-    std::memset(outputs, 0, sizeof(outputs));
-    // ГЛАВНЫЙ ФИКС: просим драйвер отдать float
-    outputs[0].want_float = 1; 
-    outputs[0].is_prealloc = 0;
+    memset(outputs, 0, sizeof(outputs));
+    outputs[0].want_float = 1; // Просим драйвер сделать деквантование в float
+    outputs[0].is_prealloc = 0; // Драйвер сам выделит память
 
-    if (rknn_outputs_get(ctx, 1, outputs, NULL) < 0) return {};
+    int ret = rknn_outputs_get(ctx, 1, outputs, nullptr);
+    if (ret < 0) {
+        std::cout << "rknn_outputs_get error ret=" << ret << std::endl;
+        return {};
+    }
 
-    // Копируем как float
-    int count = outputs[0].size / sizeof(float);
-    std::vector<float> result((float*)outputs[0].buf, (float*)outputs[0].buf + count);
-    
+    // Копируем данные в наш вектор
+    // Размер тензора: 14 * 5376
+    int out_size = 14 * 5376;
+    std::vector<float> result((float*)outputs[0].buf, (float*)outputs[0].buf + out_size);
+
+    // ОСВОБОЖДАЕМ БУФЕР ДРАЙВЕРА (Обязательно!)
     rknn_outputs_release(ctx, 1, outputs);
+
     return result;
 }
