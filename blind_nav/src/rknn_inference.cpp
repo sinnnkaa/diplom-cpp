@@ -71,7 +71,7 @@ std::vector<float> RKNNModel::infer(const cv::Mat& img) {
 
     rknn_output outputs[1];
     memset(outputs, 0, sizeof(outputs));
-    outputs[0].want_float = 0; // ЗАБИРАЕМ СЫРЫЕ БАЙТЫ
+    outputs[0].want_float = 1; // ЗАБИРАЕМ СЫРЫЕ БАЙТЫ
 
     rknn_outputs_get(ctx, 1, outputs, nullptr);
 

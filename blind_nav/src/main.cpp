@@ -7,7 +7,7 @@ int main() {
     std::cout << "--- Запуск программы (Diplom Navigation) ---" << std::endl;
 
     RKNNModel model;
-    if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_stable.rknn")) {
+    if (!model.load("/root/diplom-cpp/blind_nav/model/yolo11_final.rknn")) {
         std::cerr << "Не удалось загрузить модель!" << std::endl;
         return -1;
     }
@@ -34,7 +34,7 @@ int main() {
 
     // Декодирование результатов
     // Передаем 512, 512 как размеры входа модели
-    auto results = decode(raw_out.data(), 512, 512, img_w, img_h, 0.01f);
+    auto results = decode(raw_out.data(), 512, 512, img_w, img_h, 0.4f);
 
     std::cout << "Найдено реальных объектов: " << results.size() << std::endl;
 
