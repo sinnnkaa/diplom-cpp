@@ -101,34 +101,34 @@ std::vector<Detection> decode(const std::vector<std::vector<float>>& outputs,
                               int orig_w, int orig_h, float threshold) {
     std::vector<Detection> all_dets;
     
-    // Шаги сетки и её размеры для входа 512x512
     int strides[] = {8, 16, 32};
-    int grid_sizes[] = {input_w / 8, input_w / 16, input_w / 32}; // 64, 32, 16
+    int grid_sizes[] = {input_w / 8, input_w / 16, input_w / 32};
 
-    // 1. Проходим по всем трем выходам
+    // 1. Декодируем все три уровня в координатах 512x512
     for (int i = 0; i < 3; i++) {
         decode_single_output(outputs[i].data(), grid_sizes[i], strides[i], threshold, all_dets);
     }
 
-    // 2. Возвращаем координаты в исходный размер картинки
-    float scale = std::min((float)input_w / orig_w, (float)input_h / orig_h);
-    float dx = (input_w - orig_w * scale) / 2.0f;
-    float dy = (input_h - orig_h * scale) / 2.0f;
+    // 2. ИСПРАВЛЕННЫЙ ПЕРЕСЧЕТ: Рассчитываем раздельные коэффициенты
+    // input_w и input_h у вас равны 512
+    float scale_x = (float)orig_w / (float)input_w; 
+    float scale_y = (float)orig_h / (float)input_h;
 
     std::vector<Detection> final_dets;
     for (auto& det : all_dets) {
-        float real_w = det.w / scale;
-        float real_h = det.h / scale;
-        float real_x = (det.x - dx) / scale;
-        float real_y = (det.y - dy) / scale;
+        // Просто перемножаем координаты без вычета dx/dy
+        float real_x = det.x * scale_x;
+        float real_y = det.y * scale_y;
+        float real_w = det.w * scale_x;
+        float real_h = det.h * scale_y;
 
-        // Проверка выхода за границы кадра
-        if (real_x >= 0 && real_y >= 0 && real_x < orig_w && real_y < orig_h && real_w < orig_w) {
+        // Фильтрация по границам оригинала
+        if (real_x >= 0 && real_y >= 0 && (real_x + real_w) <= orig_w && (real_y + real_h) <= orig_h) {
             final_dets.push_back({det.class_id, det.score, real_x, real_y, real_w, real_h});
         }
     }
 
-    // 3. Применяем NMS (удаление дубликатов)
+    // 3. NMS
     apply_nms(final_dets, 0.45f);
     
     return final_dets;
