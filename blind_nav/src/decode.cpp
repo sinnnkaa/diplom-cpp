@@ -29,7 +29,6 @@ void apply_nms(std::vector<Detection>& input, float threshold) {
     input = result;
 }
 
-// Вычисление DFL (Distribution Focal Loss) для одной координаты
 inline float compute_dfl(const float* tensor, int step) {
     float max_val = -10000.0f;
     for (int i = 0; i < 16; i++) {
@@ -50,7 +49,6 @@ inline float compute_dfl(const float* tensor, int step) {
     return res;
 }
 
-// Декодирование одного масштаба (P3, P4 или P5)
 void decode_single_output(const float* output, int grid_size, int stride, 
                           float conf_thresh, std::vector<Detection>& proposals) {
     int num_classes = 10;
@@ -61,15 +59,11 @@ void decode_single_output(const float* output, int grid_size, int stride,
     for (int i = 0; i < area; i++) {
         int grid_y = i / grid_size;
         int grid_x = i % grid_size;
-
-        // Находим смещение для текущей ячейки (i)
-        // В формате NCHW: данные одного канала лежат подряд (area)
         
         float max_conf = -1.0f;
         int class_id = -1;
 
         for (int c = 0; c < num_classes; c++) {
-            // Вероятности классов начинаются после 64 каналов боксов
             float s = output[(64 + c) * area + i]; 
             float conf = sigmoid(s);
             if (conf > max_conf) {
@@ -81,12 +75,8 @@ void decode_single_output(const float* output, int grid_size, int stride,
         if (max_conf > conf_thresh) {
             float dfl[4]; 
             for (int k = 0; k < 4; k++) {
-                // Вычисляем DFL для каждой из 4 сторон
-                // Берём 16 каналов, относящихся к текущей стороне k
                 dfl[k] = compute_dfl(output + (k * 16) * area + i, area);
             }
-
-            // РАСЧЕТ В ПИКСЕЛЯХ (относительно центра ячейки и шага сетки)
             float x0 = (grid_x + 0.5f - dfl[0]) * stride;
             float y0 = (grid_y + 0.5f - dfl[1]) * stride;
             float x1 = (grid_x + 0.5f + dfl[2]) * stride;
@@ -104,31 +94,25 @@ std::vector<Detection> decode(const std::vector<std::vector<float>>& outputs,
     int strides[] = {8, 16, 32};
     int grid_sizes[] = {input_w / 8, input_w / 16, input_w / 32};
 
-    // 1. Декодируем все три уровня в координатах 512x512
     for (int i = 0; i < 3; i++) {
         decode_single_output(outputs[i].data(), grid_sizes[i], strides[i], threshold, all_dets);
     }
 
-    // 2. ИСПРАВЛЕННЫЙ ПЕРЕСЧЕТ: Рассчитываем раздельные коэффициенты
-    // input_w и input_h у вас равны 512
     float scale_x = (float)orig_w / (float)input_w; 
     float scale_y = (float)orig_h / (float)input_h;
 
     std::vector<Detection> final_dets;
     for (auto& det : all_dets) {
-        // Просто перемножаем координаты без вычета dx/dy
         float real_x = det.x * scale_x;
         float real_y = det.y * scale_y;
         float real_w = det.w * scale_x;
         float real_h = det.h * scale_y;
 
-        // Фильтрация по границам оригинала
         if (real_x >= 0 && real_y >= 0 && (real_x + real_w) <= orig_w && (real_y + real_h) <= orig_h) {
             final_dets.push_back({det.class_id, det.score, real_x, real_y, real_w, real_h});
         }
     }
 
-    // 3. NMS
     apply_nms(final_dets, 0.45f);
     
     return final_dets;

@@ -13,7 +13,6 @@ int main() {
     }
     std::cout << "Model Loaded!" << std::endl;
 
-    // Загружаем тестовое изображение
     std::string img_path = "/root/diplom-cpp/blind_nav/_4g6iIzKJPj_8_PTRPIV3Q_aug_0.jpg";
     cv::Mat img = cv::imread(img_path);
     if (img.empty()) {
@@ -24,7 +23,6 @@ int main() {
     int img_w = img.cols;
     int img_h = img.rows;
 
-    // Инференс (теперь внутри сам делается resize до 512x512)
     auto raw_out = model.infer(img);
 
     if (raw_out.empty()) {
@@ -32,13 +30,10 @@ int main() {
         return -1;
     }
 
-    // Декодирование результатов
-    // Передаем 512, 512 как размеры входа модели
     auto results = decode(raw_out, 512, 512, img_w, img_h, 0.4f);
 
     std::cout << "Найдено реальных объектов: " << results.size() << std::endl;
 
-    // Отрисовка
     for (const auto& det : results) {
         std::cout << "Рисую: Класс " << det.class_id 
         << " [" << det.x << ", " << det.y << ", " << det.w << ", " << det.h << "]" << std::endl;

@@ -12,8 +12,7 @@ public:
     ~RKNNModel();
 
     bool load(const std::string& model_path);
-    
-    // Возвращаем 3 выходных тензора
+
     std::vector<std::vector<float>> infer(const cv::Mat& img);
 
     rknn_context get_ctx();

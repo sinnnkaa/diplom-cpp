@@ -10,7 +10,6 @@ RKNNModel::~RKNNModel() {
     if (ctx > 0) rknn_destroy(ctx);
 }
 
-// Чтение файла модели в память
 static unsigned char* load_model_file(const char* filename, int* model_size) {
     std::ifstream file(filename, std::ios::binary | std::ios::ate);
     if (!file.is_open()) return nullptr;
@@ -61,7 +60,6 @@ std::vector<std::vector<float>> RKNNModel::infer(const cv::Mat& img) {
     rknn_inputs_set(ctx, 1, inputs);
     rknn_run(ctx, nullptr);
 
-    // Запрашиваем 3 выхода в формате float
     rknn_output outputs[3];
     memset(outputs, 0, sizeof(outputs));
     outputs[0].want_float = 1;
@@ -79,8 +77,6 @@ std::vector<std::vector<float>> RKNNModel::infer(const cv::Mat& img) {
     int sizes[] = {74 * 64 * 64, 74 * 32 * 32, 74 * 16 * 16};
 
     for (int i = 0; i < 3; i++) {
-        // Поскольку want_float = 1, драйвер NPU уже деквантовал данные.
-        // Нам остается только скопировать готовые float значения в наш вектор.
         float* float_buf = (float*)outputs[i].buf;
         dequantized_outputs[i].assign(float_buf, float_buf + sizes[i]);
     }
