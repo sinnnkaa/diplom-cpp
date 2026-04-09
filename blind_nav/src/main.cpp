@@ -34,7 +34,7 @@ int main() {
 
     // Декодирование результатов
     // Передаем 512, 512 как размеры входа модели
-    auto results = decode(raw_out.data(), 512, 512, img_w, img_h, 0.8f);
+    auto results = decode(raw_out.data(), 512, 512, img_w, img_h, 0.01f);
 
     std::cout << "Найдено реальных объектов: " << results.size() << std::endl;
 
