@@ -1,3 +1,0 @@
-/root/diplom-cpp/blind_nav/build/CMakeFiles/blind_nav.dir
-/root/diplom-cpp/blind_nav/build/CMakeFiles/edit_cache.dir
-/root/diplom-cpp/blind_nav/build/CMakeFiles/rebuild_cache.dir

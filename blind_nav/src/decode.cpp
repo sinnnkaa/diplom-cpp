@@ -54,7 +54,7 @@ void decode_single_output(const float* output, int grid_size, int stride,
     int num_classes = 10;
     int reg_max = 16;
     int area = grid_size * grid_size;
-    int channels = 4 * reg_max + num_classes; // 64 + 10 = 74
+    int channels = 4 * reg_max + num_classes;
 
     for (int i = 0; i < area; i++) {
         int grid_y = i / grid_size;

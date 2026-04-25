@@ -19,7 +19,7 @@ add_executable(blind_nav
     src/main.cpp
     src/rknn_inference.cpp
     src/decode.cpp
-    src/audio.cpp
+    
 )
 
 target_link_libraries(blind_nav
