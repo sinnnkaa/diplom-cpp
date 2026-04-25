@@ -60,3 +60,25 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now blind_nav.service
 ```
 
+### 4. Структура директорий
+
+```text
+diplom-cpp/
+├── blind_nav/
+│   ├── src/                 # Исходный код C++
+│   │   ├── main.cpp         # Главный цикл (Камера -> NPU -> Логика)
+│   │   ├── decode.cpp       # Постобработка YOLO (NMS, Bounding Boxes)
+│   │   └── rknn_inference.cpp # Обертка для работы с Rockchip NPU
+│   ├── model/               # Скомпилированные веса
+│   │   └── yolo11_final.rknn # Модель INT8 для RK3566
+│   ├── map/                 # Оффлайн навигация
+│   │   ├── spb.pbf          # Исходный граф OpenStreetMap
+│   │   └── addresses.json   # Локальная хэш-таблица адресов
+│   └── build/               # Скомпилированные бинарники и службы
+│       ├── stream.py        # MJPEG-сервер трансляции
+│       └── start_nav.sh     # Скрипт запуска для systemd
+├── piper/                   # Локальный нейросетевой TTS-движок
+├── vosk/                    # Модель распознавания речи (STT)
+└── README.md
+```
+
